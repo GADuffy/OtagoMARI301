@@ -1,0 +1,822 @@
+---
+title: |
+  Introduction to GIS and mapping in R
+output:
+  learnr::tutorial:
+    css: css/custom.css
+    progressive: true
+    allow_skip: true
+runtime: shiny_prerendered
+description: >
+  Otago Marine Science MARI301 2024 - Introduction to R-based GIS/spatial tools for marine ecology.
+---
+
+```{r setup, include=FALSE}
+#remove.packages("data.table")
+#install.packages("data.table") #fix for weird terra plot error
+
+library(learnr)
+library(readr)
+library(tibble)
+
+library(data.table)
+
+library(ggplot2)
+library(terra)
+library(tidyterra)
+library(rnaturalearth)
+library(ggspatial)
+
+library(slickR)
+
+world_poly <- rnaturalearth::ne_countries(scale = 110, returnclass = "sv")
+#NIWAdata <- readRDS("data/NIWAdata.rda")
+data("NIWAdata")
+
+NIWA_allpoints <- vect(NIWAdata, 
+	geom = c("decimalLongitude", "decimalLatitude"), 
+	crs = "EPSG:4326") 
+
+
+
+tutorial_options(
+  exercise.timelimit = 180,
+  # A simple checker function that just returns the message in the check chunk
+  exercise.checker = function(check_code, ...) {
+    list(
+      message = eval(parse(text = check_code)),
+      correct = logical(0),
+      type = "info",
+      location = "append"
+    )
+  }
+)
+knitr::opts_chunk$set(error = TRUE)
+```
+
+## Kia ora
+
+###
+This is the first part of our workshop where we're going to look at and clean some simple geospatial data to produce some example maps. We'll start with some of the `R` basics. Hopefully most of this early content is familiar from using `R` for stats etc. elsewhere, but it's always helpful to practice and refresh your skills. We might also be doing things a bit differently than how you've done them before (there are dozens of ways to do even the simplest of tasks in `R`!). 
+
+All of the exercises we're starting with can be readily transferred to any data analysis you might want to do in `R` (stats, data visualisation, maps - you name it and `R` can probably do it). 
+
+
+###
+Today our main goals are:
+
+* `filter` data from an online data repository using logical tests
+* convert filtered data into spatial vector format
+* read in and plot some raster data
+* see how vector/point data can be summarised to make a raster
+* create some basic plots
+* see what plotting tools are available to make more professional-looking maps
+
+
+### 
+**Everyone will work at their own pace**
+
+Those of you with GIS or computer science backgrounds will probably power through most of the exercises; if you're finding things on the easy side then I invite you to experiment with the code a bit more or even try starting with a blank code chunk and writing your own code from scratch (the worst that can happen is that it doesn't work!). And don't forget to offer to help out your classmates if it looks like they're struggling.
+
+If this is your first time working with GIS (or even with `R`) then you might take a bit more time. Don't let that phase you, don't be afraid to ask questions, and remember that the 'start over' button is there for a reason. I've been using `R` for over a decade now and I still write rubbish code that doesn't always work (hopefully not this tutorial!) and am continuously learning new and better ways to do things.
+
+## Reading in data
+###
+Before we do almost anything in `R` we first need to load any packages that we plan to use. Simple functions like `sum`, `mean` etc. are included in the base `R` and ready to use on launch, but for everything else we need packages. We've already installed all of the packages you'll be using today as part of the setup so we just need to attach/load them to make their functions available for use.
+
+In a normal `R` session you'd need to run something like the below. For this tutorial I've already loaded all the packages in the background, but it's worth getting acquainted with these packages and their purpose.
+
+```{r libload, exercise = FALSE, exercise.eval = FALSE, eval = FALSE}
+#Tidyverse is a package suite that's useful for data manipulation and cleaning
+library(tidyverse)
+
+# terra is the go to geo-library that will handle everything spatial
+library(terra)
+# rnaturalearth is used to access spatial data like country borders
+library(rnaturalearth)
+
+# the below two packages are used for plotting
+# ggplot2 is a flexible plotting packages that you might have used before to make graphs
+library(ggplot2)
+# tidyterra is an add-on for ggplot2 that add a range of functions specifically tailored for plotting spatial data
+library(tidyterra)
+```
+
+
+### Data are downloaded in a tab-delimited (tsv) format from GBIF
+To read in data from GBIF we can use the `read_csv` function from the `tidyverse` set of packages. To use this function you just need to give it file path to the file you want to open. File paths vary depending on operating system and are realtive to your working directory but will usually look something like the below with each `/` representing a folder break. 
+
+Alternatives like `read.csv` or `read.table` from base `R` could also work but using this function means we can read in the data in a format called a 'tibble'. Tibbles are similar to a standard `data.frame` (basically what your data would look like if you opened it in Excel) but they're a bit more user friendly and computationally efficient (see [here](https://tibble.tidyverse.org) for a better/more detailed explanation).
+```{r read_tsv, exercise = FALSE, exercise.eval = FALSE, eval = FALSE}
+NIWAdata <- read_csv("path/to/occurrence/data.txt")
+```
+
+### Breaking down the above code
+
+First we have the object name `NIWAdata`. `R` is an [object-orientated language](https://adv-r.hadley.nz/oo.html) so whenever we read in some data, run a model, or make a plot we need to assign that to a unique object name. Object naming is pretty flexible but there are some rules/recommendations that are worth following (e.g. your object name should not start with a number, try to avoid names that are also functions or expressions: `data`, `mean`, `TRUE` etc.).
+
+Next we have the assignment operator `<-` which tells `R` that you want everything to the right to be assigned to the object name on the left. Your arrow can also point the other way (`->`) to assign everything on the  left to an object name on the right but you'll rarely see that in practice and it can get a bit confusing. You can also use a single equals sign `=` instead of an arrow, though the arrow is more common (a single `=` is also used in function arguments while a double `==` is used in logical expressions; best to stick to `<-` for now). You might also see `<<-` used in code you see online - this is for [global assignment](https://www.r-bloggers.com/2022/09/global-vs-local-assignment-operators-in-r-vs/) and is best avoided until you're more experienced using `R` (some say it should never be used and there is always a better alternative).
+
+And finally we have the function (in this case `read_csv`) whose output is going to be assigned to the object. In `R`, functions are called using the name followed by parentheses `()` and you include any arguments inside those parenthese and seperated by commas `,`. Here we only need one argument (the character string `"path/to/occurrence/data.txt"`; note the quotation marks `"`) but when you have multiple arguments it's usually good practice to specify (e.g. `read_csv(file = "path/to/occurrence/data.txt", delim = "\t")`)
+
+### For this demonstration we're going to use some pre-loaded data
+
+So we're not spamming GBIF with loads of data requests, we'll start out using some pre-downloaded data. This [dataset](https://doi.org/10.15468/pzpgop) is from NIWA and contains species occurrence records from across NZ that have been collected by a range of other institutions. The dataset is published on GBIF but is only a small subset of what you can find on there.
+
+**Run the below code to 'print' the dataset.** In this setup, `R` will _only_ show the first 1000 rows of data.
+```{r bg_read, exercise = TRUE, exercise.eval = FALSE}
+NIWAdata
+```
+
+### Exploring the data
+Even with this relatively small dataset the data is too large to look at all at once. We have multiple columns, each with a unique name and containing specific information. And then every data record has it's own row. There are a few functions we can use to explore the dataset a bit more and get useful information without having to sift through every row and column. 
+
+**Run the various chunks of code below to explore the dataset.**
+
+Find out how many dimensions the data has. This is a simple two-dimensinal data frame so we only have two dimensions to worry about - rows (up and down) and columns (across, left to right). Rows are the first dimension, columns are the second. 
+```{r data_print, exercise = TRUE, exercise.eval = FALSE}
+dim(NIWAdata)
+```
+So this dataset has 14 526 rows and 56 columns. 
+
+
+In GBIF datasets, each column contains spatial or taxonomic information about the occurrence record. These column (aka field) names follow an international data standard called [Darwin Core](https://dwc.tdwg.org), which has identified which data might be useful for biodiersity and ecological reporting and monitoring. Not every record has data for each field, and some of the fields aren't especially useful for what we're doing today but it's a good idea to see what data fields are available and think about which might be useful for marine ecology and your future endeavours. 
+
+**Run the below code to print all of the field names in the `NIWAdata` dataset. Scroll through the output of variables and take note of any that you think might be of interest for a marine ecologist.** The naming is supposed to be relatively intuitive but full definitions of each term can be found [here](http://rs.tdwg.org/dwc/terms.htm). 
+
+```{r data_explore, exercise = TRUE, exercise.eval = FALSE}
+data.frame(names(NIWAdata))
+# you could just do names(NIWAdata) but converting to a data.frame makes the output more legible
+# try deleting the 'data.frame' portion and see what ugliness ensues
+```
+
+```{r data_explore-hint-1}
+# Remember that in ecology we're especially interested in knowing what species live where. 
+```
+
+```{r data_explore-hint-2}
+# Coordinates (latitude and longitude) are helpful, and so is taxonomic information.
+```
+
+## Filtering data
+
+### filter()
+The `filter` function lets us subset a data frame or tibble. `filter()` expects a data frame and logical test(s) through which to make a subset selection. Rows in the data frame which pass the logical tests will be returned.
+
+For example, we can use `filter()` on the `scientificName` field of our data to subset data for a specific species. If we want all records for blue cod we can run the below code. 
+```{r filter0, exercise = TRUE, exercise.eval = FALSE}
+filter(NIWAdata, scientificName == "Parapercis colias")
+```
+That returns 161 row of data, one for each blue cod occurrence record in this dataset. You'll notice that we've used the scientific binomial _Parapercis colias_ as it's the internationally accepted name for this species. See what happens if you replace the scientific name with `"blue cod"`, and try searching for another species you might expect to see in NZ waters. 
+
+If you need inspiration, use the code below to generate a list of all unique species names that can be found in this dataset.
+```{r unique1, exercise = TRUE, exercise.eval = FALSE}
+data.frame(unique(NIWAdata$scientificName))
+```
+We use the `$` dollar sign to isolate a specific column of the dataset, and then the function `unique` returns all unique names in that column for all 14526 rows of data. As in the previous exercise, we wrap the output in a `data.frame` so the output is easier to read, but it isn't strictly necessary.
+
+You'll notice that not all records have been identified down to species (i.e. full scientific binomial) level. This is one of the major challenges when working with GBIF data, and when performing biodiversity and ecological analyses more broadly.
+
+###
+
+We can use `filter` on any of the field in our dataset. In the below example we apply a filter to the `institutionCode` field of our data to subset data collected by Otago researchers. 
+```{r filter1, exercise = TRUE, exercise.eval = FALSE}
+filter(NIWAdata, institutionCode == "University of Otago")
+```
+It's important to note here that this function is case-sensitive and the match must be exact. There are some workarounds, but generally speaking for your data to be machine-readable text must be specific. Try changing the above code so see what happens if you change the case or spelling misspell your search term (e.g. `university of otago` or `Otago University`). This can also affect species names (especially scientific names, which are easy to misspell). 
+
+White spaces can be especially tricky. Run the code below and see if it works as expected. 
+```{r filterspace, exercise = TRUE, exercise.eval = FALSE}
+filter(NIWAdata, institutionCode == "University of Otago")
+```
+The spaces ` ` have been swapped out for non-breaking spaces ` `. In this tutorial your browser might show them as red dots but elsewhere (e.g. in Excel or in a basic txt file) they look identical to regular spaces. As far as the computer is concerned ` ` and ` ` might as well be `A`s and `Z`s . While cleaning data from a range of sources I've come across ` ` (non-breaking space), ` ` (thin space), and `​` (zero-width space). The difference, or even the character itself, is invisible to a human reader but can break your analyses in frustrating ways! 
+
+Degree symbols `°` in coordinate data are another area computers are easily confused - I've seen `º`, `o`, and `◦` in data but none of those would be recognised as `°` automatically. Data from a reliable source from GBIF is usually ok, but it's worth checking if your analyses isn't working as expected.
+
+### Logical tests using operators 
+
+Let's go back to our earlier example - filtering the dataset to just include data collected by Otago researchers. 
+
+```{r filter_notequal, exercise = TRUE, exercise.eval = FALSE}
+filter(NIWAdata, institutionCode == "University of Otago")
+```
+
+In this example we're using the `==` operator to test if the `institutionCode` is equal to `"University of Otago"`. Note that we use two equals symbols `==`, which is another reason to consider using `<-` instead of `=` when assigning objects in `R`. There are a range of operators you can use for filtering and broader logic tests:
+
+* `==` (equal)
+* `!=` (not equal)
+* `>` (left is greater than right)
+* `>=` (left is greater than _or equal to_ right)
+* `<` (left is less than right)
+* `<=` (left is less than _or equal to_ right)
+* `%in%` (left is in right; e.g. if checking if something is in a list)
+
+Try changing the above example to return all records that were _not_ collected by Otago researchers. 
+
+A logic test will return either `TRUE` or `FALSE` and these are then used to subset the data (all data for which the test result is `TRUE` are returned, data that return `FALSE` are discarded). Testing if things are equal or not is relatively straightforward when working with both character strings (i.e. word data; e.g. `"University of Otago"`) and with numeric data (`1, 2, 3` etc.) but, if comparing character strings, other operators may return either `NA` (no data) or weird results (how do you determine if one word is greater than another?). Run the below examples, and then make some small changes to see how it changes the results.
+
+```{r logictest, exercise = TRUE, exercise.eval = FALSE}
+1 == 1
+1 > 1
+1 >= 1
+"University of Otago" == "University of Otago"
+"South Island" > "North Island"
+"Australia" > "Aotearoa"
+```
+
+###
+
+When comparing character strings, `R` sorts them alphabetically. Because 'South' comes after 'North' alphabetically, `R` considers 'South' to be 'greater than' 'North'. This can sometimes be useful but it's always a good idea to be careful when comparing strings using these operators, especially if the strings are coded as [factors](https://r4ds.had.co.nz/factors.html). 
+
+We can also combine arguments using AND `&` or OR `|` modifiers.
+```{r filter_andor, exercise = TRUE, exercise.eval = FALSE}
+#The below will return data collected by either Otago researchers OR data for arthropods (regardless of who collected it)
+filter(NIWAdata, institutionCode == "University of Otago" | phylum == "Arthropoda")
+
+#Whereas this will return data that was both collected by Otago researchers AND is data for arthropods
+filter(NIWAdata, institutionCode == "University of Otago" & phylum == "Arthropoda")
+```
+
+###
+
+When you `filter` using a logical argument, the test is applied to each row of the data and the resulting data frame is a subset of rows that match the specified criteria. Going back to our original subset we now want to assign that subsetted data to a new object name to save it and differentiate it from the full `NIWAdata` dataset.
+
+**Modify the code below to assign our subsetted data to an object called `otago_data`.**
+
+```{r filter_assign, exercise = TRUE, exercise.eval = FALSE}
+filter(NIWAdata, institutionCode == "University of Otago")
+```
+```{r filter_assign-hint-1}
+# in R you can assign using an arrow symbol
+<-
+```
+```{r filter_assign-hint-2}
+# a left point arrows tells R to assign the output of the thing on the right to the object name on the left
+object_name <- thing_on_the_right()
+```
+```{r filter_assign-solution}
+otago_data <- filter(NIWAdata, institutionCode == "University of Otago")
+
+```
+
+## Vectors: points, lines, and polygons
+### Starting with points
+
+The first thing we'll do is plot all data in the NIWA dataset as points on a map. We'll be using the `vect` function from the `terra` package to do this. `vect` can be used to load data directly into vector format (such as a .shp file that you might download from [LINZ](https://www.linz.govt.nz)) or convert a data frame into a vector format.
+
+For background around vectors and types of vectors refer back to the lecture material.
+
+```{r niwapoints, exercise = TRUE, exercise.eval = FALSE}
+
+NIWA_allpoints <- vect(NIWAdata, 
+  # Assign the vector to an object and tell the vect function what data we want to use
+	geom = c("decimalLongitude", "decimalLatitude"), 
+  # the 'geom' argument tell the function which columns in NIWAdata contain the x (longitude) and y (latitude) 
+	crs = "EPSG:4326") 
+  #  the 'crs' argument defines the coordinate reference system we are using - EPSG:4326 is standard lat/lon coordinates used by most GPSs
+
+```
+Because we've assigned the output of the `vect` function directly to an object you won't see any output. To show the new points vector that you've created, simply type the object name into the `R` terminal. 
+
+```{r plot1, exercise = TRUE, exercise.eval = FALSE}
+NIWA_allpoints
+```
+```{r plot1-solution}
+plot(NIWA_allpoints)
+```
+This shows you the vector object you just created. Its class is a `SpatVector` - Spatial Vector, and its geometry type is points. The `dimensions` correspond to the number of geometries (in this case points) and the number of attributes each point has (columns taken from the original data frame). The `extent` shows you the spatial limits of the data set in longitude and latitude (indicated by `coord.ref`). Everything below that is your attributes table, which is taken from the original dataset. 
+
+Looking at the object info is useful, but as this is spatial data it's probably more informative to plot the points. To do a basic plot we can use `R`'s built in `plot` function. **Modify the code above to call the `plot` function for `NIWA_allpoints`.** Remember that in `R` we need to wrap function arguments in parentheses (`()`).
+
+### Adding map features
+
+We've plotted all of the points in the dataset, but the without some geographic references the points are just floating in white space. You might be able to pick out NZ in the cloud of points and work out where things should be based on the lat/lon coordinates but it's not ideal. 
+
+Let's add some more features to our map. These features can be downloaded from various sources (e.g. [Diva-GIS](https://www.diva-gis.org/Data) for global data or [LINZ](https://www.linz.govt.nz) for NZ-focused data) but today we'll use some of the built-in options in the `rnaturalearth` package. This loads a spatial polygon of the world's continents. 
+
+```{r plot2, exercise = TRUE, exercise.eval = FALSE}
+world_poly <- rnaturalearth::ne_countries(scale = 110, returnclass = "sv")
+plot(world_poly, add = FALSE, col = "grey")
+plot(NIWA_allpoints, add = TRUE, col = "red")
+```
+The colour of each plotted feature is controlled by the `col` argument. The order in which the plots are called dictates the order in which they are plotted while the `add` argument tells the function whether it should draw a new plot or add to the exisitng one. **Try changing the colours and plot order of `world_poly` and `NIWA_allpoints` to see how it changes the plot.**
+
+### Cropping to an area of interest
+
+The `NIWAdata` has points from all over the world but we're only interested in points around NZ. So we need to subset the data. There are a few ways we can do this, including using the `filter` function that we used earlier. 
+
+With that in mind, **complete the code below to use the `filter` function to subset the `NIWAdat` dataset to only include points around NZ. Assign the output to an object called `nz_data`. Then covert that to a spatial vector called `nz_points` and plot it just like we did above.**
+You will probably want to:
+
+* subset `decimalLongitude` to include only data between 166 and 179 degrees
+* subset `decimalLatitude` to include only data between -48 and -33 degrees
+
+_(look back through previous exercises if you need a reminder of how to filter)_
+
+```{r nzsubset1, exercise = TRUE, exercise.eval = FALSE}
+nz_data <- 
+  
+nz_points <- vect( , # add the object name of your subset 
+  geom = c("", ""),  # specify which columns contain the x/y information 
+	crs = "EPSG:4326")
+
+# the plotting is already set up for you below, but feel free to change things and see what happens
+plot(crop(world_poly, nz_points), add = FALSE, col = "grey")
+# note we have cropped the world_poly map of the world to match the spatial extent of nz_points
+plot(nz_points, add = TRUE, col = "red")
+```
+```{r nzsubset1-hint-1}
+# you can chain together arguments using an & to test if something is between two values
+#for longitude
+decimalLongitude > 166 & decimalLongitude < 179 
+#for latitude
+decimalLatitude < -33 & decimalLatitude > -48 
+# and then you'll want to chain those together too
+# the tidyverse package suite also has a between() function that could be used
+```
+```{r nzsubset1-hint-2}
+# for your geom argument you want to give the column names for x and y coordinates
+geom = c("decimalLongitude", "decimalLatitude"), 
+```
+
+```{r nzsubset1-solution}
+# try something like
+nz_data <- filter(NIWAdata, decimalLongitude > 166 & decimalLongitude < 179 & decimalLatitude < -33 & decimalLatitude > -48) 
+
+nz_points <- vect(nz_data, # add the object name of your subset 
+  geom = c("decimalLongitude", "decimalLatitude"),  # specify which columns contain the x/y information 
+	crs = "EPSG:4326") 
+```
+
+### An alternative method
+
+Instead of subsetting the data frame using `filter` and then converting that into a new set of spatial points, we could subset the `NIWA_allpoints` spatial points dataset that you put together previously. To do this we set up a _bounding box_ of our area of interest and use that to select just those points that fall within that box. 
+
+First we define the bounding box as a spatial polygon. We're using a rectangle for simplicity so we just specify four points, but a polygon can be as complex as you want (e.g. like the country borders in `world_poly`). Polygons can be defined using paired coordinates like we're doing here, or by drawing them freehand. You can do that using `R` ([doable](https://search.r-project.org/CRAN/refmans/spatstat.geom/html/clickpoly.html) but not especially intuitive) or in GIS software like ArcGIS or the free and open source [QGIS](https://qgis.org/en/site/).
+
+```{r bbox1, exercise = TRUE, exercise.eval = FALSE}
+# define the bounding box
+NZ_bbox <- vect(
+  # coordinates must be paired so four in the left group (longitude), four in the right (latitude)
+  # you can change the coordinates if you want to see how it alters the plot
+  # just remember to keep the two groups equal in length
+	cbind(c(166, 179, 179, 166), c(-33, -33, -48, -48)),
+	crs = "EPSG:4326", 
+	type = "polygons"
+	)
+
+# plot the bounding box on a world map
+plot(world_poly, col = "grey")
+plot(NZ_bbox, col = "red", alpha = 0.5, add = TRUE)
+
+nz_points <- crop(NIWA_allpoints, NZ_bbox)
+plot(crop(world_poly, NZ_bbox), add = FALSE, col = "grey")
+plot(nz_points, add = TRUE, col = "red")
+```
+Try extending and/or changing the coordinates of the bounding box to see how it affects the subsetting and final plot. Remember that the coordinates need to be paired; the first vector (numbers grouped together by `c()`, which is `R`-speak for [combine/group](https://www.r-bloggers.com/2020/05/combine-values-into-a-vector/) these things) is x/longitude (ranging from -180°/180°W to +180°/180°E), and the second vector is y/latitude (ranging from -90°/90°S to +90°/90°N).
+
+### Lines
+
+We've now used points (`NIWA_allpoints` and `nz_points`) and polygons (the `world_poly` outline, and the `NZ_bbox` bounding box), which leaves us with the third main type of vector, lines. Lines are essentially a sequence of points joined together in a specific order (for ecological data they're usually ordered by collection/survey time). If the lines drawn to connect points result in a closed shape then you've got a polygon. So lines are very much an intermediate between points and polygons, they're generally used less often that points or polygons but are a good way to show survey transects or species movement tracks.
+
+To start we'll select a subset of data from the `NIWAdata`. This time we're interested in data from just one published paper so we're going to filter by searching for a specific Digital Object Identifier (DOI) in the `bibliographicCitation` column of the full dataset. Instead of a standard logic test like you've used before we're using the `grepl` function, this is a more flexible way of searching than using `==` because it doesn't require an _exact_ match and returns any rows that contain our search term `10.1080/00288330.1979.9515822` anywhere within `bibliographicCitation`.
+
+The full the citation for this publication is:
+```{r, exercise = FALSE, exercise.eval = FALSE, echo = FALSE}
+"R. C. Willan , J. M. Dollimore & Jon Nicholson (1979)  A survey of fish populations at Karikari Peninsula, Northland, by scuba diving, New Zealand Journal of Marine and Freshwater Research, 13:3, 447-458, DOI: 10.1080/00288330.1979.9515822"
+```
+If we just use the standard `==` test we'd need to include all of that information, formatted exactly to ensure a match.
+```{r, exercise = FALSE, exercise.eval = FALSE}
+"R. C. Willan , J. M. Dollimore & Jon Nicholson (1979)  A survey of fish populations at Karikari Peninsula, Northland, by scuba diving, New Zealand Journal of Marine and Freshwater Research, 13:3, 447-458, DOI: 10.1080/00288330.1979.9515822" ==
+"R. C. Willan , J. M. Dollimore & Jon Nicholson (1979)  A survey of fish populations at Karikari Peninsula, Northland, by scuba diving, New Zealand Journal of Marine and Freshwater Research, 13:3, 447-458, DOI: 10.1080/00288330.1979.9515822"
+```
+Even a small mistake would return `FALSE` instead of `TRUE`. 
+```{r, exercise = FALSE, exercise.eval = FALSE}
+"R. C. Willan , J. M. Dollimore & Jon Nicholson (1979)  A survey of fish populations at Karikari Peninsula, Northland, by scuba diving, New Zealand Journal of Marine and Freshwater Research, 13:3, 447-458, DOI:10.1080/00288330.1979.9515822" == 
+"R. C. Willan , J. M. Dollimore & Jon Nicholson (1979)  A survey of fish populations at Karikari Peninsula, Northland, by scuba diving, New Zealand Journal of Marine and Freshwater Research, 13:3, 447-458, DOI: 10.1080/00288330.1979.9515822"
+```
+With `grepl` we just need to make sure that DOI part is correct. And the function also has an `ignore.case` option so we don't even need to worry about capitalisation. 
+```{r, exercise = FALSE, exercise.eval = FALSE}
+grepl("10.1080/00288330.1979.9515822", "R. C. Willan , J. M. Dollimore & Jon Nicholson (1979)  A survey of fish populations at Karikari Peninsula, Northland, by scuba diving, New Zealand Journal of Marine and Freshwater Research, 13:3, 447-458, DOI: 10.1080/00288330.1979.9515822", ignore.case = TRUE)
+```
+Applying a logic test using `grepl` and `filter` we can do something like the below to extract the data, convert it first to spatial points, and then link those points together to make a spatial line. Points are linked together in the order in which the points occur (i.e. row 1 -> row 2 -> etc.) so if you need to order them in a different way (e.g. sort by time) then be sure to sort the data beforehand. 
+
+```{r lines1_setup, exercise = FALSE, exercise.eval = FALSE, echo = FALSE}
+northland_poly <- crop(rnaturalearth::ne_countries(scale = 10, returnclass = "sv", country = "New Zealand"), vect(
+	cbind(c(173, 175, 175, 173), c(-33, -33, -35, -35)),
+	crs = "EPSG:4326", 
+	type = "polygons"
+	))
+```
+
+```{r lines1, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "lines1_setup"}
+# get just the data from this one publication
+survey_data <- filter(NIWAdata, grepl("10.1080/00288330.1979.9515822", bibliographicCitation, ignore.case = TRUE))
+
+#convert the subsetted data into spatial points
+survey_points <- vect(survey_data, 
+	geom = c("decimalLongitude", "decimalLatitude"),
+	crs = "EPSG:4326")
+
+#convert the spatial points into a line
+survey_line <- as.lines(survey_points)
+
+#plot - we're using a pre-cropped map of the study area
+plot(northland_poly, col = "grey")
+plot(survey_line, add = TRUE, col = "red")
+
+```
+_Admittedly, this isn't the prettiest example of using lines in a map, but it hopefully gives you idea of what you can do_
+
+## Rasters
+###
+Rasters and vectors share some features but there are a few key differences. The main one being that, unlike vectors, rasters have a spatial resolution and comprise a grid of (usually) equally spaced cells. If you're working with data such as bathymetry or sea-surface temperature layers then you're probably using a raster. 
+
+Raster data comes in a variety of formats ranging from a simple `.txt` file with a matrix of values representing each cell in the grid, to a georeferenced image file like a `.tif` or `.jpg`, or even a self-contained database as found in `.nc` or `.hdf` files. The functions we use today can be used interchangeably to read in a range of file formats (though `.nc` and `.hdf` in particular might require a different approach depnding on how they've been packaged).
+
+### Open and plot some bathymetry data
+
+We'll start with some data from The General Bathymetric Chart of the Oceans ([GEBCO](https://www.gebco.net)). This a global compilation of bathymetry data which is updated regularly as new data come in - only a fraction of the ocean floor has been surveyed at very high resolutions, initiatives like [SeaBed2030](https://seabed2030.org) are working to address this. NIWA has some more up to date and higher resolution data for the local seabed, which will eventually be ingested into GEBCO/SeaBed2030, but for now we'll stick to GEBCO for simplicity. 
+
+We use the `rast` function to open a raster file in R. This function works similarly to the `read_csv` and `vect` functions we used previously. Simply point it to the filepath of the file you want to open, and assign the output to an object name (here `gebco_nz`). Then the basic `plot` function with show you your data.
+
+```{r raster1, exercise = TRUE, exercise.eval = FALSE}
+gebco_nz <- rast("data/gebco_nz.tif")
+plot(gebco_nz)
+```
+```{r raster1-solution}
+# add the following
+plot(world_poly, add = TRUE)
+plot(NIWA_allpoints, add = TRUE, col = "red")
+```
+GEBCO includes elevation data for both land and sea, but you should still be able to make out the general shape of the coastline. Rasters and vectors can be easily combined when plotting. 
+
+**Try adding the `world_poly` land outline and `NIWA_allpoints` spatial points to the plot above.**
+
+```{r prettymap, exercise = FALSE, exercise.eval = FALSE, echo = FALSE}
+gebco_nz <- rast("data/gebco_nz.tif")
+
+nz_points <- crop(NIWA_allpoints, vect(
+	cbind(c(166, 179, 179, 166), c(-33, -33, -48, -48)),
+	crs = "EPSG:4326", 
+	type = "polygons"
+	))
+
+nz_poly <- crop(rnaturalearth::ne_countries(scale = 10, returnclass = "sv", country = "New Zealand"), vect(
+	cbind(c(166, 179, 179, 166), c(-33, -33, -48, -48)),
+	crs = "EPSG:4326", 
+	type = "polygons"
+	))
+gebco_nz <- rast("data/gebco_nz.tif")
+
+nz_placenames <- vect("data/lds-nz-place-names-nzgb-SHP/nz-place-names-nzgb.shp")
+
+```
+
+### Analyses of rasters
+Just like with vector data, we can apply simple spatial functions, such as reprojection and cropping, to rasters. Because rasters inherently have a spatial resolution, many of the functions that are unique to rasters relate to changing that resolution which gives us functions like `resample`, `aggregate` and `disagg` (disaggregate), which give us a variety of ways to change the resolution of our raster data. 
+
+The `res` function can be used to find the resolution of a raster object.
+
+We'll first `aggregate` the GEBCO data that we worked with previously. I've already added the code for aggregation but you'll need to **add one line to `plot` the result and one line to find out what the new resolution is.**
+```{r rst_resample, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "prettymap"}
+res(gebco_nz)
+gebco_agg <- aggregate(gebco_nz, fact = 100)
+# the fact argument specifies the factor by which we want to aggregate - do we want the resolution to be 10x lower, or 100x lower?
+# add a line to plot the gebco_agg output
+```
+```{r rst_resample-hint-1}
+# the res function can be used to return the resolution
+res(gebco_agg)
+```
+```{r rst_resample-hint-2}
+# and then a basic plot
+plot(gebco_agg)
+```
+###
+
+Now we'll disaggregate the raster again, and compare against the original dataset. As above, **add one line to plot the `gebco_disagg` raster and one line to plot the original `gebco_nz` raster.** 
+```{r rst_disagg, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "rst_resample"}
+gebco_disagg <- disagg(gebco_agg, fact = 100)
+# like before the fact argument specifies the factor by which we want to disaggregate
+res(gebco_disagg) # print the resolution
+res(gebco_nz)
+# add lines to plot each raster
+```
+Assuming we disaggregate using the same `fact` as we aggregated with, the resolution of `gebco_disagg` and the original `gebco_nz` are the same (compare your `res` outputs). But you just need to look at the plots to see that the two rasters are very different. There are some very smart downscaling methods that we could use to convert coarse-resolution data to a higher resolution, but generally speaking we cannot magically _enhance_ a raster to get a higher resolution than is provided by the original observations/data source.
+
+### Extracting data from rasters
+We can extract data from raster layers using spatial points, polygons, or lines. This is especially useful for applications like species distribution modelling, or even just to identify a species' niche using occurrence data. We probably won't have time to go into these more advanced applications today but the below code chunk will show you how to extract the water depth (from the `gebco_nz` dataset) for every occurrence record contained in the `nz_points` spatial points you made earlier.
+
+Extract returns a data frame with a row for every point, a column containing each point's unique id, and a column named after the raster layer which contains the extracted dat for each point.
+```{r rst_extract, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "prettymap"}
+depth_data <- extract(gebco_nz, nz_points)
+depth_data
+
+#plot depth data as a histogram
+hist(depth_data[,2])
+```
+For a marine dataset there sure are a lot of points > 0 m deep - why do you think that might be?
+
+## Analysing point data to create rasters
+
+###
+
+One of the most useful analyses we can do with ecological data is convert species occurrence records (points) to abundance and/or richness layers (rasters). We can do that using the `rasterize` function which summarises the point data that is covered by each raster cell. Depending on what we're interested we can summarise using a function (such as `mean`, `sum`, or `median`) applied to any attribute of the vector attribute table (i.e. the columns in our original data frame). 
+
+###
+In the below example we will summarise the `nz_points` dataset and we're going to count the total number of records in each cell. This sort of plot is often referred to as a heatmap and let's us visualise the density of points. This is especially useful when we have a lot of overlapping points which might block each other out if we plot points directly. 
+
+Because we're converting a vector (which has no resolution) to a raster (which _needs_ a resolution) we need to give the `rasterize` function a 'target' raster from which our final output will inherit spatial extent and spatial resolution. Below we create a target raster using the `rast` function; the extent and projection are taken from the `nz_points` object (vectors _do_ have these) but the resolution needs to be defined using the `res = ` argument. Here we use a resolution of 0.5° in both the x and y directions. You could use a smaller number to get a higher resolution but when working at larger scales high-resolution raster files can get very big very quickly. We're working with a small dataset here so you can try a higher resolution if you'd like. 
+
+**Run the below code. Once you have a plot, move on to the next section to see how you might improve it**
+
+```{r count_rst, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "prettymap"}
+# assign the output to an object called nz_count
+nz_count <- rasterize(nz_points,
+  # define the target raster with a 0.5° resolution
+  rast(nz_points, res = 0.5),
+  # choose the field (i.e. column name) that we want to apply our summary function to
+  # here it doesn't matter much because we just want a simple count but you could write a function that counts only sea stars or, like in the next example, counts unique records
+  field="id",
+  # this is the summary function we want to apply
+  # this function simply returns a count (the length the list of points within each cell)
+  # the na.omit function makes sure we're not counting missing/NA data
+	fun = function(x) length(na.omit(x))
+  )
+
+plot(nz_count, main = "Number of records") # main defines the plot title
+plot(nz_poly, add = TRUE)
+```	
+###
+Annoyingly the default colour palette uses off-white for low numbers, and because the limits of the scale are set automatically some cells with high values (1000+ records) are skewing things. You could improve this in a multipe ways, for example:
+
+* log-transform the data by applying the `log10` function to the `niwa_count` raster
+* manually define your limits in the plot function using a `range = ` argument in the `plot` function
+* choose a different colour palette for your plot - e.g. adding something like `col = cm.colors(100)` as an argument in the `plot` function 
+* edit the `niwa_count` raster so that high values are clipped (e.g. cells with >50 records are set to 50)
+
+**See if you can make edits to the above code to implement one or more of these improvements, or come up with your own solution.**
+```{r count_rst-hint-1}
+# log-transform the data
+plot(log10(nz_count), main = "Number of records (log10 scale)")
+plot(nz_poly, add = TRUE)
+```
+```{r count_rst-hint-2}
+# set scale range
+# but note what this does to cells outside of the range
+plot(nz_count, main = "Number of records", range = c(0, 50))
+plot(nz_poly, add = TRUE)
+```
+
+```{r count_rst-hint-3}
+# change the colour palette
+plot(nz_count, main = "Number of records", range = c(0, 50), col = cm.colors(100))
+# the cm.colors(100) function generates a vector of 100 colours from the 'cm.colors' palette
+# other ready to use palettes include rainbow and heat.colors (try swapping with cm.colors)
+# or you can make a vector of your own colours with something like col = c("#67001F", "#B2182B", "#D6604D", "#F4A582", "#FDDBC7", "#D1E5F0", "#92C5DE", "#4393C3", "#2166AC", "#053061")
+plot(nz_poly, add = TRUE)
+```
+
+```{r count_rst-hint-4}
+# clip the raster, and then plot
+nz_count_clipped <- nz_count # clone the object so we don't 'destroy' the original
+nz_count_clipped[nz_count_clipped > 50] <- 50 #set all values >50 to 50 exactly
+plot(nz_count_clipped, main = "Number of records")
+# technically the legend scale should say "50+" but this is a pain to do in basic plots
+# other plotting options that we cover later handle this much better!
+plot(nz_poly, add = TRUE)
+```
+
+### Calculating species richness
+
+Let's see if you can update the code to calculate species richness rather than just a count of records. To do that you will need to **edit the code below** (which is identical to the example above apart from assigning the output to an object called `nz_spprich`). You will need to:
+
+* change the `field` argument to a field in the dataset that can be used to identify the exact species associated with each point
+* change the `fun` (function) argument to return the `length` of `unique` records in each cell
+
+```{r spprich_rst, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "prettymap"}
+nz_spprich <- rasterize(nz_points,
+  rast(nz_points, res = 0.5),
+  field="id",
+	fun = function(x) length(na.omit(x))
+  )
+
+plot(nz_spprich, main = "Species richness")
+plot(nz_poly, add = TRUE)
+```	
+```{r spprich_rst-hint-1}
+#To see what fields/columns are in your dataset you can run:
+names(nz_points)
+# which do you think will provide a unique name for each species?
+# think about taxonomic ranks and the differences between common and scientific names
+```	
+```{r spprich_rst-hint-2}
+# the function 'unique' can be used to return unique values in x
+unique(x)
+# but you still need to omit NA values and find the length of unique
+```	
+```{r spprich_rst-hint-3}
+# try this function for your 'fun =' argument
+function(x) length(unique(na.omit(x)))
+```	
+
+### 
+That covers the basics of working with and plotting spatial data in `R`. It's a lot to take in if you haven't used GIS or `R` much before, but there's no harm in messing around with the code to see what small changes do. _If your changes 'break' things just start over and try again_. In the next section we're going to look at some more advanced plotting code to make your maps a bit more aesthetically pleasing (basic `R` plots aren't exactly easy on the eye). 
+
+Before moving on make sure you're comfortable with the basics, go back through (and mess around with!) each of the exercises again if it helps, and don't be afraid to ask any and all questions.
+
+## Pretty(er) maps
+###
+Like most things in `R` there are dozens of ways to put together plots, figures, and maps. You've already seen a few example use the base `R` plotting functions. It is possible to fine tune those plots to make them a bit nicer but in my opinion there are better options. One of the more commonly used packages is `ggplot2`, which you might have used before for plotting data, linear models etc. To me, building 'publication-ready' plots in `ggplot2` is easier and more intuitive that using other methods. 
+
+Below are a few examples from either my own research or research from our postgraduate students - all made in `R` using (mostly) `ggplot2`. 
+
+```{r, echo = FALSE}
+slickR(obj = list.files("images", full.names = TRUE), height = 500) + settings(dots = TRUE, initialSlide = 3, slidesToShow = 1, slidesToScroll = 1, focusOnSelect = TRUE, adaptiveHeight = TRUE, autoplay = TRUE, autoplaySpeed = 3000)
+```
+
+### Give it a go
+
+Maps can be made using a combination of the `ggplot2` and `tidyterra` packages. Just like with the other plots we've made, we can build up a plot layer by layer. The main diferrence between `ggplot2` and base `R` plot building is that in `ggplot2` we use the `+` symbol to add layers made by different functions instead of adding an `add = TRUE` argument to each layer. 
+
+Going back to a (slightly modified) plot we made earlier. Plotting in base `R` looks like this:
+
+
+```{r plot_base, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "prettymap"}
+plot(gebco_nz)
+plot(nz_poly, add = TRUE, col = "grey")
+plot(nz_points, add = TRUE, col = "red")
+```
+
+Whereas plotting in `ggplot2` would look like this (note the trailing `+` on every line except the last one):
+```{r plot_ggplot, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "prettymap"}
+ggplot() +# initiate a ggplot2 plot then add various 'geoms' which is ggplot-speak for components of the plot
+	# add the GEBCO spatial raster
+  geom_spatraster(data = gebco_nz) +
+  # add the NZ outline spatial vector - note ggplot differentiates fill and colour (colour changes the outline)
+	geom_spatvector(data = nz_poly, fill = "grey") +
+  # add the NIWA points spatial vector
+	geom_spatvector(data = nz_points, colour = "red") # no '+' symbol
+```
+The real benefit of `ggplot` is when you start to customise the look of your map a bit more. Below is an example of the same map but I've added a few extra lines to style it. Using `ggplot2` it's very easy to alter things like the colour palette, the shape, colour and size of points, and small details that add a level polish to the final map. 
+
+**Run the code below and then experiment with editing, moving, or even deleting lines of code to see what happens.** The `coord_sf` layer at the bottom is a good place to start changing things.
+
+_Remember, you need to include `+` symbols to join your various lines/layers together but the last line should have no `+` symbol. And if things go wrong you can always hit 'start over' to reset the code._
+```{r plot_ggplot2, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "prettymap"}
+ggplot() +
+  # add the gebco raster
+	geom_spatraster(data = gebco_nz) +
+  # create a black contour line using the gebco raster - lines at 100m, 250m, 500m, 1000m, and 2000m water depths
+  geom_spatraster_contour(data = gebco_nz, breaks = c(-100, -250, -500, -1000, -2000), colour = "black") +
+  # add the polygon of NZ
+  geom_spatvector(data = nz_poly, fill = "grey60", colour = "black") +
+  # add black squares (shape = 15; www.sthda.com/english/wiki/ggplot2-point-shapes) for each town or city in the LINZ 'nz_placenames' dataset
+  geom_spatvector(data = nz_placenames[nz_placenames$feat_type == "City" | nz_placenames$feat_type == "Town"], col = "black", size = 2, shape = 15) +
+  # add points from the nz_points dataset, colour the points based on taxonomic kingdom, make them semi-transparent (alpha = 0.5)
+  geom_spatvector(data = nz_points, aes(colour  = kingdom), alpha = 0.5) +
+  # add text labels for all cities in the LINZ 'nz_placenames' dataset, label using the 'name' field, make label semi-transparent with alpha, use nudge_x/y to fine tune position
+  geom_spatvector_label(data = nz_placenames[nz_placenames$feat_type == "City"], aes(label = name), alpha = 0.5, nudge_x = 0, nudge_y = +0.2) +
+  # use a gradient as the fill of the raster (GEBCO bathymetry) data. 
+  # using hex codes to specify start and end colours: #5a738c is dark grey/blue, #d4e8fc is a pale blue - type into a search engine to check/get codes for other colours
+  # any NA values are not shown - na.value = NA
+  # set the min and max limits to -2000 m and 0 m
+  # for nicer labelling we apply a function [function(x)x*-1] to the values to multiply them by -1 
+  scale_fill_gradient(low = "#5a738c", high = "#d4e8fc", na.value = NA, limits = c(-2000, 0), labels = function(x)x*-1, name = "Depth (m)") +
+  # add a name to colour legend label
+  scale_colour_discrete(name = "Kingdom") +
+  # add a label to the x axis
+  xlab("Longitude") +
+  # add a label to the y axis
+  ylab("Latitude") +
+  # add black rectangle (without a colour fill) around the outside of the plot
+  theme(panel.border = element_rect(fill = NA, colour = "black")) +
+  # define the spatial limits of the plot
+  # this is yet another way we can crop/subset our data spatially 
+  # - though technically the rest of the plot is still there, we're just not showing it
+  coord_sf(xlim = c(170,  174), ylim = c(-47, -44))
+```
+
+## Sandbox
+If you've made it this far in the workshop - well done! Even though this only serves as an introduction to what you can do with GIS and `R`, it's a lot of information to take in in a very brief period of time. Our final exercise aims to apply some of what you've learned to create _your_ map. 
+
+
+You've got free reign to create a map of anywhere around NZ (the pre-loaded data is NZ-only to save on space). The first chunk of code is where you're going to build your map. I've given you some starter code but you'll have to add the rest yourself. 
+
+I've put a selection of options in the second code chunk below so just copy over and/or edit until you've got a map you're happy with. There are hundreds of graphics customisation options you can adjust in `ggplot2`. Full details of every option are available from the `ggplot2` [reference manual](https://ggplot2.tidyverse.org/reference/). The [R Graphics Cookbook](https://r-graphics.org) is another great resource that will show you how to make the most of all of the options that can be applied to a range of different plot types (not just maps). If there's anything specific you want to try that's not listed then just ask in the workshop and I _might_ have some suggestion (no promises - there are so many functions/arguments!).
+
+_Remember that the order of you layers dictates the order in which they're plotted, and make sure you have trailing `+` symbols and the end of each line to chain your plot layers together but no `+` at the very end._
+
+```{r sandbox, exercise = TRUE, exercise.eval = FALSE, exercise.setup = "prettymap"}
+ggplot() + 
+  ### add your layers here
+  ### copy-paste from below
+  ### or write your own 
+  # Finish with something like this
+  # currently these x/y limits are all of NZ - change them to crop/zoom in
+  coord_sf(xlim = c(166,  179), ylim = c(-48, -33))
+```
+
+Pick and choose plot functions for each layer you want to add. You don't need to use them all (if you do some will conflict with each other and give an error anyway) so try a mix of options and changes to the arguments (e.g. `colour = "green"`). If you have multiple lines that use the exact same function (e.g. `theme()`) then you probably want to combine them into one function call as arguments separated by commas `,` (e.g. `theme(legend.position = "top", panel.border = element_rect()`) to avoid conflicts.
+
+You can edit in either code window but put together the code you want to run to build your plot in the window above. Just click 'start over' to reset the contents of either window. 
+
+```{r sand, exercise = TRUE, exercise.eval = FALSE}
+
+  # create a contour line using the gebco raster
+  geom_spatraster_contour(data = gebco_nz, breaks = c(-1, -2, -3, -4, -5), colour = "blue") +
+  
+  # create a filled contour plot from gebco data
+  # use binwidth argument to specify how far apart you want the contours
+  geom_spatraster_contour_filled(data = gebco_nz, binwidth = 100) +
+  
+  # add a polygon of NZ
+  geom_spatvector(data = nz_poly, fill = "pink", colour = "green") +
+  
+  # add squares (shape = 15; sthda.com/english/wiki/ggplot2-point-shapes) for each town or city in the LINZ 'nz_placenames' dataset
+  geom_spatvector(data = nz_placenames[nz_placenames$feat_type == "City" | nz_placenames$feat_type == "Town"], col = "orange", size = 5, shape = 15) +
+  
+  # add points from the nz_points dataset, colour the points based on a field
+  geom_spatvector(data = nz_points, aes(colour  = scientificName)) +
+  
+  # add text labels for all cities in the LINZ 'nz_placenames' dataset
+  # label using the 'name' field, use nudge_x/y to fine tune position
+  geom_spatvector_label(data = nz_placenames[nz_placenames$feat_type == "City"], aes(label = name), nudge_x = 0, nudge_y = 0) +
+
+  # add the gebco raster
+	geom_spatraster(data = gebco_nz) +
+  
+    
+  # STYLING OPTIONS FOR COLOUR/FILL SCALES
+    # colour using the 'hue' colour palette
+  scale_colour_hue(name = "INSERT NAME HERE") +
+  
+  # colour using a greyscale palette 
+  scale_fill_grey(name = "INSERT NAME HERE") + 
+  
+    # fill using a viridis colour palette
+  # viridis is more accessible to people with colour deficient vision
+  scale_fill_viridis_c(name = "INSERT NAME HERE") +
+  
+  # fill using a greyscale palette 
+  scale_fill_grey(name = "INSERT NAME HERE") + 
+  
+  # use a custom gradient as the fill of the raster (GEBCO bathymetry) data - adjust the limits to suit, atm they're between 0 and -10k
+  scale_fill_gradient(low = "red", high = "orange", na.value = NA, limits = c(-10000, 0), labels = function(x)x*-1, name = "Depth (m)") +
+  
+  # use a 'colombia hypso' standardisted topp/bathy colour scheme as the fill of the raster (GEBCO bathymetry) data - blue -> brown/green 
+  # all palette argument options can be found here: https://dieghernan.github.io/tidyterra/articles/palettes.html
+  scale_fill_hypso_c(palette = "colombia") +
+  
+  # STYLING OPTIONS FOR TEXT LABELS, PLOT OUTLINES, OTHER AESTHETIC THINGS.
+  # add a label to the x axis
+  xlab("X AXIS LABEL") +
+  
+  # add a label to the y axis
+  ylab("Y AXIS LABEL") +
+  
+  # add a chunky red dashed line (a rectangle w/o a colour fill) around the outside of the plot
+  theme(panel.border = element_rect(fill = NA, colour = "red", linewidth = 2, linetype = "dashed")) +
+
+  # apply a complete theme restyle - minimal
+  theme_minimal() +
+    
+  # apply a complete theme restyle - black and white
+  theme_bw() +
+
+  # apply a complete theme restyle - dark
+  theme_dark() +
+      
+  # apply a complete theme restyle - 'classic'
+  theme_classic() +
+      
+  # position the legend at the bottom of the plot
+  theme(legend.position = "bottom") +
+  
+  # add (thick green) grid lines over the plot
+  theme(panel.grid.major = element_line(colour = "green", linewidth = 2), panel.background = element_blank(), panel.ontop = TRUE) + 
+  
+  # hide the legend for colour 
+  guides(colour = "none") + 
+  
+  # hide the legend for fill 
+  guides(fill = "none") + 
+  # you can merge this with the above to hide both just include both arguments separated by a comma
+  
+  # add a title
+  ggtitle("My map", subtitle = "A map I made") +
+
+  # add a North arrow
+  # location = "tl" - put the scale in the top left
+  # adjust the pad_x/y to add padding around the arrow make sure it doesn't overlap anything else
+  # adjust the height and width to change the shape and size of the arrow
+  # style = choose what type of arrow you want - options are: north_arrow_orienteering, north_arrow_fancy_orienteering, north_arrow_minimal, or north_arrow_nautical
+  annotation_north_arrow(location = "tl", which_north = "true", pad_x = unit(5, "mm"), pad_y = unit(5, "mm"), width = unit(10, "mm"), height = unit(10, "mm"), style = north_arrow_nautical) +
+
+  # add a scale bar
+  # location = "bl" - put the scale in the bottom left
+  # width_hint - roughly how wide do you want the scale (R will round to nearest sensible number to keep it pretty)
+  annotation_scale(location = "bl", width_hint = 0.5) + 
+
+```
