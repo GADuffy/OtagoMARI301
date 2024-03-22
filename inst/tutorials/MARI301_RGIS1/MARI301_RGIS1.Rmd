@@ -740,6 +740,13 @@ You can edit in either code window but put together the code you want to run to 
   # add points from the nz_points dataset, colour the points based on a field
   geom_spatvector(data = nz_points, aes(colour  = scientificName)) +
   
+  # add points for a specific species in the nz_points dataset
+  # the use of square brackets [] let's us subset the data to just blue cod points
+  # - similar to the filter function but are bit less intuitive; note the use of the $ sign needed to specify both the object and column
+  # try changing to another species scientific name, or subsetting using a different field by swapping the field name in after the $
+  # you can also try different logic operators like != > %in% etc
+  geom_spatvector(data = nz_points[nz_points$scientificName == "Parapercis colias"]) +
+  
   # add text labels for all cities in the LINZ 'nz_placenames' dataset
   # label using the 'name' field, use nudge_x/y to fine tune position
   geom_spatvector_label(data = nz_placenames[nz_placenames$feat_type == "City"], aes(label = name), nudge_x = 0, nudge_y = 0) +
@@ -802,7 +809,7 @@ You can edit in either code window but put together the code you want to run to 
   
   # hide the legend for fill 
   guides(fill = "none") + 
-  # you can merge this with the above to hide both just include both arguments separated by a comma
+  # you can merge this with the above to hide both - just include both arguments separated by a comma
   
   # add a title
   ggtitle("My map", subtitle = "A map I made") +
